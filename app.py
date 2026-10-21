@@ -22,7 +22,7 @@ def getConection():
         port=1433,
         cafile=certifi.where(),
         validate_host=True,
-        enc_login_only=False
+        enc_login_only=False,
         row_strategy=pytds.namedtuple_row_static_strategy
     )
 
