@@ -15,15 +15,14 @@ app = Flask(__name__)
 # ==========================================
 def getConection():
     return pytds.connect(
-        server=os.environ['DB_SERVER'],
-        database=os.environ['DB_DATABASE'],
-        user=os.environ['DB_USER'],
-        password=os.environ['DB_PASS'],
+        server=os.environ.get('DB_SERVER'),
+        database=os.environ.get('DB_DATABASE'),
+        user=os.environ.get('DB_USER'),
+        password=os.environ.get('DB_PASS'),
         port=1433,
         cafile=certifi.where(),
         validate_host=True,
-        enc_login_only=False,
-        row_strategy=pytds.namedtuple_row_static_strategy
+        enc_login_only=False
     )
 
 # ==========================================
@@ -33,11 +32,10 @@ def enviar_correo(destinatario, total_productos, lista_productos):
     url = "https://api.brevo.com/v3/smtp/email"
     headers = {
         "accept": "application/json",
-        "api-key": os.getenv("BREVO_API_KEY"),
+        "api-key": os.environ.get("BREVO_API_KEY"),
         "content-type": "application/json"
     }
 
-    # Filas de la tabla de productos para el correo
     filas_html = ""
     for p in lista_productos:
         filas_html += f"""
@@ -83,7 +81,7 @@ def enviar_correo(destinatario, total_productos, lista_productos):
     payload = {
         "sender": {
             "name": "Catálogo Web",
-            "email": os.getenv("EMAIL_REMITENTE")
+            "email": os.environ.get("EMAIL_REMITENTE")
         },
         "to": [{"email": destinatario}],
         "subject": f"Catálogo de Productos ({total_productos} disponibles)",
@@ -98,22 +96,19 @@ def enviar_correo(destinatario, total_productos, lista_productos):
 # ==========================================
 @app.route('/api/procesar', methods=['POST'])
 def procesar_y_notificar():
-    # 1. Validación de seguridad con la API Key (semilla)
-    api_key_recibida = request.headers.get("X-API-Key")
-    api_key_servidor = os.getenv("PROCESS_API_KEY", "")
+    api_key_recibida = request.headers.get("X-API-Key", "")
+    api_key_servidor = os.environ.get("PROCESS_API_KEY", "")
 
     if not api_key_recibida or not hmac.compare_digest(api_key_recibida, api_key_servidor):
         return jsonify({"error": "No autorizado: API Key inválida"}), 401
 
-    # 2. Correo destino
-    data = request.get_json() or {}
-    correo_destino = data.get("correo_cliente") or os.getenv("EMAIL_DESTINO")
+    data = request.get_json(silent=True) or {}
+    correo_destino = data.get("correo_cliente") or os.environ.get("EMAIL_DESTINO")
 
     if not correo_destino:
         return jsonify({"error": "Falta el correo de destino"}), 400
 
     try:
-        # 3. Consulta a Azure SQL
         conn = getConection()
         cursor = conn.cursor()
         cursor.execute("SELECT id, names, price, stock FROM products_vw")
@@ -122,7 +117,7 @@ def procesar_y_notificar():
         for row in cursor.fetchall():
             productos.append({
                 "id": row[0],
-                "names": row[1],
+                "names": str(row[1]),
                 "price": float(row[2]),
                 "stock": int(row[3])
             })
@@ -131,7 +126,6 @@ def procesar_y_notificar():
 
         total = len(productos)
 
-        # 4. Enviar mediante Brevo SaaS
         codigo_mail, respuesta_mail = enviar_correo(
             destinatario=correo_destino,
             total_productos=total,
@@ -185,7 +179,7 @@ def get_products():
         for row in cursor.fetchall():
             products.append({
                 "id": row[0],
-                "names": row[1],
+                "names": str(row[1]),
                 "price": float(row[2]),
                 "stock": int(row[3])
             })
@@ -200,12 +194,12 @@ def get_product(id):
     try:
         conn = getConection()
         cursor = conn.cursor()
-        cursor.execute("SELECT id, names, price, stock FROM products_vw WHERE id=?", (id,))
+        cursor.execute("SELECT id, names, price, stock FROM products_vw WHERE id=%s", (id,))
         row = cursor.fetchone()
         if row:
             product = {
                 "id": row[0],
-                "names": row[1],
+                "names": str(row[1]),
                 "price": float(row[2]),
                 "stock": int(row[3])
             }
@@ -222,7 +216,7 @@ def get_product(id):
 @app.route("/api/products", methods=['POST'])
 def create_product():
     try:
-        data = request.get_json()
+        data = request.get_json(silent=True)
         if not data:
             return jsonify({"mensaje": "No existen datos validos"}), 400
 
@@ -235,7 +229,7 @@ def create_product():
 
         conn = getConection()
         cursor = conn.cursor()
-        cursor.execute("EXEC products_insert_sp ?,?,?", (names, price, stock))
+        cursor.execute("EXEC products_insert_sp %s, %s, %s", (names, price, stock))
         conn.commit()
         cursor.close()
         conn.close()
