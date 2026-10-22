@@ -4,6 +4,7 @@ import certifi
 import pytds
 import requests
 import hmac
+from datetime import datetime
 
 # ==========================================
 # APLICACIÓN FLASK
@@ -27,8 +28,9 @@ def getConection():
 
 # ==========================================
 # SERVICIO SAAS: ENVÍO DE CORREO (BREVO)
+# Notificación resumida según diapositivas
 # ==========================================
-def enviar_correo(destinatario, total_productos, lista_productos):
+def enviar_correo(destinatario, total_productos):
     url = "https://api.brevo.com/v3/smtp/email"
     headers = {
         "accept": "application/json",
@@ -36,43 +38,24 @@ def enviar_correo(destinatario, total_productos, lista_productos):
         "content-type": "application/json"
     }
 
-    filas_html = ""
-    for p in lista_productos:
-        filas_html += f"""
-        <tr style="border-bottom: 1px solid #e5e7eb;">
-            <td style="padding: 10px 14px; text-align: left; font-weight: bold; color: #1f2937;">{p.get('names', 'Sin nombre')}</td>
-            <td style="padding: 10px 14px; text-align: center; color: #4b5563;">{p.get('stock', 0)}</td>
-            <td style="padding: 10px 14px; text-align: right; font-weight: bold; color: #111827;">${p.get('price', 0):.2f}</td>
-        </tr>
-        """
+    fecha_hora = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
     cuerpo_html = f"""
-    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; border: 1px solid #e5e7eb; border-radius: 8px; overflow: hidden; background: #ffffff;">
-        <div style="background-color: #111827; color: #ffffff; padding: 25px 20px; text-align: center;">
-            <p style="letter-spacing: 2px; font-size: 11px; text-transform: uppercase; margin: 0 0 6px 0; color: #9ca3af;">NUESTRO CATÁLOGO</p>
-            <h2 style="margin: 0; font-size: 22px; font-weight: 500;">Productos Disponibles</h2>
+    <div style="font-family: Arial, sans-serif; max-width: 550px; margin: 0 auto; border: 1px solid #e2e8f0; border-radius: 8px; overflow: hidden; background: #ffffff;">
+        <div style="background-color: #1e293b; color: #ffffff; padding: 20px; text-align: center;">
+            <h2 style="margin: 0; font-size: 20px;">Procesamiento finalizado</h2>
         </div>
-        <div style="padding: 25px;">
-            <p style="color: #4b5563; font-size: 14px; line-height: 1.5; margin-top: 0;">
-                Hola. Se ha generado con éxito la consulta del catálogo de productos desde la arquitectura distribuida.
-            </p>
-            <div style="background: #f9fafb; border: 1px solid #e5e7eb; padding: 10px; border-radius: 6px; text-align: center; margin: 18px 0; font-weight: bold; font-size: 13px; color: #374151;">
-                TOTAL DE PRODUCTOS EN CATÁLOGO: {total_productos}
+        <div style="padding: 25px; color: #334155; font-size: 15px; line-height: 1.6;">
+            <p>El procesamiento ha finalizado correctamente.</p>
+            
+            <div style="background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 15px; margin: 20px 0;">
+                <p style="margin: 6px 0;"><strong>Proceso:</strong> Consulta de productos</p>
+                <p style="margin: 6px 0;"><strong>Detalle:</strong> Se procesaron {total_productos} registros de Azure SQL</p>
+                <p style="margin: 6px 0;"><strong>Fecha:</strong> {fecha_hora}</p>
             </div>
-            <table style="width: 100%; border-collapse: collapse; font-size: 14px; margin-top: 15px;">
-                <thead>
-                    <tr style="background: #f3f4f6; color: #6b7280; text-transform: uppercase; font-size: 11px; letter-spacing: 1px;">
-                        <th style="padding: 10px 14px; text-align: left;">PRODUCTO</th>
-                        <th style="padding: 10px 14px; text-align: center;">STOCK</th>
-                        <th style="padding: 10px 14px; text-align: right;">PRECIO</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {filas_html}
-                </tbody>
-            </table>
-            <p style="margin-top: 30px; font-size: 12px; color: #9ca3af; text-align: center;">
-                Integración de modelos en la nube: IaaS (Azure VM) + PaaS (Render & Azure SQL) + SaaS (Brevo)
+
+            <p style="font-size: 13px; color: #64748b; margin-top: 25px; text-align: center;">
+                Notificación automática desde Brevo &bull; Sistema Distribuido UTA
             </p>
         </div>
     </div>
@@ -80,11 +63,11 @@ def enviar_correo(destinatario, total_productos, lista_productos):
 
     payload = {
         "sender": {
-            "name": "Catálogo Web",
+            "name": "Aplicaciones Distribuidas",
             "email": os.environ.get("EMAIL_REMITENTE")
         },
         "to": [{"email": destinatario}],
-        "subject": f"Catálogo de Productos ({total_productos} disponibles)",
+        "subject": "Procesamiento finalizado",
         "htmlContent": cuerpo_html
     }
 
@@ -111,25 +94,18 @@ def procesar_y_notificar():
     try:
         conn = getConection()
         cursor = conn.cursor()
-        cursor.execute("SELECT id, names, price, stock FROM products_vw")
         
-        productos = []
-        for row in cursor.fetchall():
-            productos.append({
-                "id": row[0],
-                "names": str(row[1]),
-                "price": float(row[2]),
-                "stock": int(row[3])
-            })
+        # Conteo de registros procesados según la guía
+        cursor.execute("SELECT COUNT(*) FROM products_vw")
+        total = cursor.fetchone()[0]
+        
         cursor.close()
         conn.close()
 
-        total = len(productos)
-
+        # Enviar únicamente la notificación resumida requerida
         codigo_mail, respuesta_mail = enviar_correo(
             destinatario=correo_destino,
-            total_productos=total,
-            lista_productos=productos
+            total_productos=total
         )
 
         if codigo_mail in [200, 201]:
