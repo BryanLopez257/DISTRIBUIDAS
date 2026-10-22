@@ -4,7 +4,6 @@ import certifi
 import pytds
 import requests
 import hmac
-from datetime import datetime
 
 # ==========================================
 # APLICACIÓN FLASK
@@ -28,9 +27,8 @@ def getConection():
 
 # ==========================================
 # SERVICIO SAAS: ENVÍO DE CORREO (BREVO)
-# Notificación resumida según diapositivas
 # ==========================================
-def enviar_correo(destinatario, total_productos):
+def enviar_correo(destinatario, total_productos, lista_productos):
     url = "https://api.brevo.com/v3/smtp/email"
     headers = {
         "accept": "application/json",
@@ -38,36 +36,41 @@ def enviar_correo(destinatario, total_productos):
         "content-type": "application/json"
     }
 
-    fecha_hora = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    # Lista sencilla y limpia de los productos
+    items_html = ""
+    for p in lista_productos:
+        items_html += f"""
+        <li style="margin-bottom: 8px;">
+            <strong>{p.get('names', 'Sin nombre')}</strong> - Precio: ${p.get('price', 0):.2f} (Stock: {p.get('stock', 0)} unidades)
+        </li>
+        """
 
     cuerpo_html = f"""
-    <div style="font-family: Arial, sans-serif; max-width: 550px; margin: 0 auto; border: 1px solid #e2e8f0; border-radius: 8px; overflow: hidden; background: #ffffff;">
-        <div style="background-color: #1e293b; color: #ffffff; padding: 20px; text-align: center;">
-            <h2 style="margin: 0; font-size: 20px;">Procesamiento finalizado</h2>
-        </div>
-        <div style="padding: 25px; color: #334155; font-size: 15px; line-height: 1.6;">
-            <p>El procesamiento ha finalizado correctamente.</p>
-            
-            <div style="background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 15px; margin: 20px 0;">
-                <p style="margin: 6px 0;"><strong>Proceso:</strong> Consulta de productos</p>
-                <p style="margin: 6px 0;"><strong>Detalle:</strong> Se procesaron {total_productos} registros de Azure SQL</p>
-                <p style="margin: 6px 0;"><strong>Fecha:</strong> {fecha_hora}</p>
-            </div>
-
-            <p style="font-size: 13px; color: #64748b; margin-top: 25px; text-align: center;">
-                Notificación automática desde Brevo &bull; Sistema Distribuido UTA
-            </p>
-        </div>
+    <div style="font-family: Arial, sans-serif; max-width: 550px; margin: 0 auto; color: #333333; line-height: 1.5;">
+        <h2 style="color: #111827; border-bottom: 2px solid #eaeaea; padding-bottom: 10px;">Catálogo de Productos</h2>
+        
+        <p>Gracias por mostrar interes en nuestro catalogo de productos, a continuacion te compartimos los productos que se encuentran disponibles.</p>
+        
+        <p><strong>Total de productos disponibles:</strong> {total_productos}</p>
+        
+        <ul style="padding-left: 20px;">
+            {items_html}
+        </ul>
+        
+        <p style="margin-top: 25px; font-size: 13px; color: #666666;">
+            Saludos cordiales,<br>
+            <strong>Catálogo Web Distribuido</strong>
+        </p>
     </div>
     """
 
     payload = {
         "sender": {
-            "name": "Aplicaciones Distribuidas",
+            "name": "Catálogo Web",
             "email": os.environ.get("EMAIL_REMITENTE")
         },
         "to": [{"email": destinatario}],
-        "subject": "Procesamiento finalizado",
+        "subject": "Productos disponibles - Catálogo Web",
         "htmlContent": cuerpo_html
     }
 
@@ -94,18 +97,25 @@ def procesar_y_notificar():
     try:
         conn = getConection()
         cursor = conn.cursor()
+        cursor.execute("SELECT id, names, price, stock FROM products_vw")
         
-        # Conteo de registros procesados según la guía
-        cursor.execute("SELECT COUNT(*) FROM products_vw")
-        total = cursor.fetchone()[0]
-        
+        productos = []
+        for row in cursor.fetchall():
+            productos.append({
+                "id": row[0],
+                "names": str(row[1]),
+                "price": float(row[2]),
+                "stock": int(row[3])
+            })
         cursor.close()
         conn.close()
 
-        # Enviar únicamente la notificación resumida requerida
+        total = len(productos)
+
         codigo_mail, respuesta_mail = enviar_correo(
             destinatario=correo_destino,
-            total_productos=total
+            total_productos=total,
+            lista_productos=productos
         )
 
         if codigo_mail in [200, 201]:
